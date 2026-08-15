@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Roblox 2D Mega Obby</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(180deg, #1a2536 0%, #0d131a 100%);
+            user-select: none;
+            -webkit-user-select: none;
+            color: white;
+        }
+
+        /* Haupt-Container für das Spiel */
+        #game-container {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        /* Spiel-Leinwand */
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        /* Roblox Style UI oben links */
+        #ui {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: rgba(0, 0, 0, 0.75);
+            padding: 15px 25px;
+            border-radius: 12px;
+            border: 2px solid #555;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            pointer-events: none;
+        }
+        .stat-line {
+            font-size: 20px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .stat-val { color: #00ffcc; }
+        .coin-val { color: #ffd700; }
+
+        /* Mobile Touch-Steuerung unten links */
+        #controls {
+            position: absolute;
+            bottom: 30px;
+            left: 30px;
+            display: flex;
+            gap: 15px;
+        }
+        .btn {
+            width: 75px;
+            height: 75px;
+            background: rgba(255, 255, 255, 0.2);
+            border: 3px solid rgba(255,255,255,0.8);
+            border-radius: 50%;
+            color: white;
+            font-size: 32px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+        }
+        .btn:active {
+            background: rgba(255, 255, 255, 0.5);
+        }
+
+        /* Springen-Knopf unten rechts */
+        #btn-jump {
+            position: absolute;
+            bottom: 30px;
+            right: 30px;
+            width: 95px;
+            height: 95px;
+            background: rgba(255, 255, 255, 0.3);
+            border: 3px solid white;
+            border-radius: 50%;
+            color: white;
+            font-size: 20px;
+            font-weight: bold;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            touch-action: manipulation;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        }
+        #btn-jump:active {
+            background: rgba(255, 255, 255, 0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+
+        <div id="ui">
+            <div class="stat-line">Level: <span id="level-display" class="stat-val">1</span></div>
+            <div class="stat-line">Münzen: <span id="coins-display" class="coin-val">0</span> 💰</div>
+        </div>
+
+        <!-- Touch-Tasten für Handys -->
+        <div id="controls">
+            <div class="btn" id="btn-left">◀</div>
+            <div class="btn" id="btn-right">▶</div>
+        </div>
+        <div id="btn-jump">JUMP</div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Leinwand-Größe anpassen
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- SPIEL-VARIABLEN ---
+        let coins = 0;
+        let currentLevel = 1;
+        const baseReward = 5;
+
+        // Kamera-Verschiebung
+        let cameraY = 0;
+
+        // --- DER CHARAKTER (Roblox Noob-Style) ---
+        const player = {
+            x: 200,
+            y: 0, // Wird im Reset gesetzt
+            width: 32,
+            height: 48,
+            vx: 0,
+            vy: 0,
+            speed: 5,
+            jumpForce: -12,
+            isGrounded: false,
+            colorHead: '#ffd700', // Gelber Kopf
+            colorTorso: '#0055ff', // Blaues Shirt
+            colorLegs: '#00aa00'  // Grüne Hose
+        };
+
+        // --- WELT-STRUKTUR (Plattformen & Laser) ---
+        let platforms = [];
+        let lasers = [];
+
+        function generateLevel() {
+            platforms = [];
+            lasers = [];
+            cameraY = 0;
+
+            // Fester Boden ganz unten
+            platforms.push({ x: 0, y: canvas.height - 40, width: canvas.width * 2, height: 40, color: '#333333', isFinish: false });
+
+            let currentY = canvas.height - 140;
+            let lastX = canvas.width / 2 - 50;
+
+            // Erstelle Stufen nach oben basierend auf dem aktuellen Level
+            // Höhere Level haben mehr Plattformen und engere Abstände
+            const numPlatforms = 6 + currentLevel * 2;
+
+            for (let i = 0; i < numPlatforms; i++) {
+                let width = Math.max(80, 160 - currentLevel * 10);
+                let minX = Math.max(50, lastX - 180);
+                let maxX = Math.min(canvas.width - width - 50, lastX + 180);
+                let x = Math.random() * (maxX - minX) + minX;
+
+                platforms.push({
+                    x: x,
+                    y: currentY,
+                    width: width,
+                    height: 20,
+                    color: '#00ff88',
+                    isFinish: false
+                });
+
+                // Platziere manchmal einen roten Laser auf der Plattform
+                if (i > 0 && Math.random() < 0.4 + (currentLevel * 0.05)) {
+                    lasers.push({
+                        x: x + width / 4,
+                        y: currentY - 15,
+                        width: width / 2,
+                        height: 8,
+                        color: '#ff0000'
+                    });
+                }
+
+                lastX = x;
+                currentY -= 120;
+            }
+
+            // Die goldene Ziel-Plattform ganz oben
+            platforms.push({
+                x: lastX - 20,
+                y: currentY,
+                width: 140,
+                height: 25,
+                color: '#ffd700',
+                isFinish: true
+            });
+
+            resetPlayerPosition();
+        }
+
+        function resetPlayerPosition() {
+            player.x = canvas.width / 2 - player.width / 2;
+            player.y = canvas.height - 100;
+            player.vx = 0;
+            player.vy = 0;
+        }
+
+        // --- STEUERUNG ---
+        const keys = { left: false, right: false };
+
+        // Tastatur (PC)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') keys.left = true;
+            if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') keys.right = true;
+            if ((e.key === 'ArrowUp' || e.key === ' ' || e.key.toLowerCase() === 'w') && player.isGrounded) {
+                player.vy = player.jumpForce;
+                player.isGrounded = false;
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key.toLowerCase() === 'a') keys.left = false;
+            if (e.key === 'ArrowRight' || e.key.toLowerCase() === 'd') keys.right = false;
+        });
+
+        // Touch-Tasten (Handy)
+        const btnLeft = document.getElementById('btn-left');
+        const btnRight = document.getElementById('btn-right');
+        const btnJump = document.getElementById('btn-jump');
+
+        btnLeft.addEventListener('touchstart', (e) => { e.preventDefault(); keys.left = true; });
+        btnLeft.addEventListener('touchend', (e) => { e.preventDefault(); keys.left = false; });
+        
+        btnRight.addEventListener('touchstart', (e) => { e.preventDefault(); keys.right = true; });
+        btnRight.addEventListener('touchend', (e) => { e.preventDefault(); keys.right = false; });
+
+        btnJump.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            if (player.isGrounded) {
+                player.vy = player.jumpForce;
+                player.isGrounded = false;
+            }
+        });
+
+        // --- PHYSIK & UPDATE ---
+        const gravity = 0.5;
+
+        function update() {
+            // Horizontale Bewegung
+            if (keys.left) {
+                player.vx = -player.speed;
+            } else if (keys.right) {
+                player.vx = player.speed;
+            } else {
+                player.vx = 0;
+            }
+
+            player.x += player.vx;
+            
+            // Schwerkraft anwenden
+            player.vy += gravity;
+            player.y += player.vy;
+
+            // Grenzen der Spielwelt links/rechts
+            if (player.x < 0) player.x = 0;
+            if (player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+
+            // Kamera folgt dem Spieler vertikal flüssig
+            let targetCameraY = player.y - canvas.height / 2;
+            cameraY += (targetCameraY - cameraY) * 0.1;
+
+            // Kollisionsabfrage mit Plattformen
+            player.isGrounded = false;
+            platforms.forEach(plat => {
+                // Prüfen ob Spieler auf der Plattform landet
+                if (player.x + player.width > plat.x && player.x < plat.x + plat.width) {
+                    if (player.vy >= 0 && player.y + player.height >= plat.y && player.y + player.height - player.vy <= plat.y + 10) {
+                        player.y = plat.y - player.height;
+                        player.vy = 0;
+                        player.isGrounded = true;
+
+                        // Level geschafft Logik (Goldene Plattform)
+                        if (plat.isFinish) {
+                            levelUp();
+                        }
+                    }
+                }
+            });
+
+            // Kollisionsabfrage mit roten Lasern
+            lasers.forEach(laser => {
+                if (player.x + player.width > laser.x && player.x < laser.x + laser.width &&
+                    player.y + player.height > laser.y && player.y < laser.y + laser.height) {
+                    resetPlayerPosition(); // Zurück zum Start bei Laser-Berührung
+                }
+            });
+
+            // Wenn der Spieler ganz nach unten aus dem Bildschirm fällt (Lava/Absturz)
+            if (player.y > canvas.height + 200) {
+                resetPlayerPosition();
+            }
+        }
+
+        function levelUp() {
+            // Belohnung verdoppelt sich pro geschafftem Level (Level 1 = 5, Level 2 = 10, Level 3 = 20...)
+            let reward = baseReward * Math.pow(2, currentLevel - 1);
+            coins += reward;
+            currentLevel += 1;
+
+            // UI Texte aktualisieren
+            document.getElementById('coins-display').innerText = coins;
+            document.getElementById('level-display').innerText = currentLevel;
+
+            alert(`🎉 Level geschafft! Du erhältst ${reward} Münzen.\nWillkommen in Level ${currentLevel}!`);
+            generateLevel();
+        }
+
+        // --- GRAFIK ZEICHNEN ---
+        function draw() {
+            // Hintergrund löschen
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            // Kamera-Verschiebung anwenden
+            ctx.translate(0, -cameraY);
+
+            // Plattformen zeichnen
+            platforms.forEach(plat => {
+                ctx.fillStyle = plat.color;
+                ctx.fillRect(plat.x, plat.y, plat.width, plat.height);
+                
+                // Schattierung/Design für Plattformen
+                ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+                ctx.fillRect(plat.x, plat.y + plat.height - 6, plat.width, 6);
+            });
+
+            // Rote Laser zeichnen
+            lasers.forEach(laser => {
+                ctx.fillStyle = laser.color;
+                ctx.shadowColor = '#ff0000';
+                ctx.shadowBlur = 15;
+                ctx.fillRect(laser.x, laser.y, laser.width, laser.height);
+                ctx.shadowBlur = 0; // Schatten zurücksetzen
+            });
+
+            // Roblox-Charakter (Noob) zeichnen
+            // Beine (Grün)
+            ctx.fillStyle = player.colorLegs;
+            ctx.fillRect(player.x + 2, player.y + 30, 12, 18);
+            ctx.fillRect(player.x + 18, player.y + 30, 12, 18);
+
+            // Torso/Körper (Blau)
+            ctx.fillStyle = player.colorTorso;
+            ctx.fillRect(player.x, player.y + 12, player.width, 18);
+
+            // Kopf (Gelb)
+            ctx.fillStyle = player.colorHead;
+            ctx.fillRect(player.x + 8, player.y, 16, 12);
+
+            // Gesicht/Augen (Schwarz) wie ein Roblox Noob
+            ctx.fillStyle = '#000000';
+            ctx.fillRect(player.x + 11, player.y + 3, 2, 2);
+            ctx.fillRect(player.x + 19, player.y + 3, 2, 2);
+            // Lächeln
+            ctx.fillRect(player.x + 12, player.y + 8, 8, 2);
+
+            ctx.restore();
+        }
+
+        // --- SPIEL-SCHLEIFE ---
+        function gameLoop() {
+            update();
+            draw();
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Spiel starten
+        generateLevel();
+        gameLoop();
+    </script>
+</body>
+</html>
